@@ -1,12 +1,13 @@
 import { join } from 'upath';
 import { envMock, mockExecAll } from '../../../../test/exec-util';
 import { Fixtures } from '../../../../test/fixtures';
-import { env, fs, git, partial } from '../../../../test/util';
+import { env, fs, git, mocked, partial } from '../../../../test/util';
 import { GlobalConfig } from '../../../config/global';
 import type { RepoGlobalConfig } from '../../../config/types';
 import { logger } from '../../../logger';
 import * as docker from '../../../util/exec/docker';
 import type { StatusResult } from '../../../util/git/types';
+import * as _hostRules from '../../../util/host-rules';
 import type { UpdateArtifactsConfig } from '../types';
 import { constructPipCompileCmd, extractResolver } from './artifacts';
 import { updateArtifacts } from '.';
@@ -24,6 +25,7 @@ const adminConfig: RepoGlobalConfig = {
   containerbaseDir: join('/tmp/renovate/cache/containerbase'),
 };
 const dockerAdminConfig = { ...adminConfig, binarySource: 'docker' };
+const hostRules = mocked(_hostRules);
 
 process.env.BUILDPACK = 'true';
 
@@ -274,6 +276,28 @@ describe('modules/manager/pip-compile/artifacts', () => {
         )
       ).toBe(
         'pip-compile --allow-unsafe --generate-hashes --no-emit-index-url --strip-extras --resolver=backtracking --output-file=requirements.txt requirements.in'
+      );
+    });
+
+    it('returns extracted index urls', () => {
+      hostRules.find.mockReturnValueOnce({
+        username: 'usernameOne',
+        password: 'passwordOne',
+      });
+      hostRules.find.mockReturnValueOnce({});
+      hostRules.find.mockReturnValueOnce({
+        username: 'usernameTwo',
+        password: 'passwordTwo',
+      });
+
+      expect(
+        constructPipCompileCmd(
+          Fixtures.get('requirementsWithIndexUrls.txt'),
+          'subdir/requirements.in',
+          'subdir/requirements.txt'
+        )
+      ).toBe(
+        'pip-compile --index-url=https://usernameOne:passwordOne@first-pypi.example.com/simple --extra-index-url=http://second-pypi.example.com/simple --extra-index-url=https://usernameTwo:passwordTwo@third-pypi.example.com/simple --output-file=requirements.txt requirements.in'
       );
     });
 

@@ -3,6 +3,7 @@ import { quote, split } from 'shlex';
 import upath from 'upath';
 import { TEMPORARY_ERROR } from '../../../constants/error-messages';
 import { logger } from '../../../logger';
+import type { HostRule } from '../../../types';
 import { exec } from '../../../util/exec';
 import type { ExecOptions } from '../../../util/exec/types';
 import {
@@ -12,7 +13,9 @@ import {
   writeLocalFile,
 } from '../../../util/fs';
 import { getRepoStatus } from '../../../util/git';
+import { find } from '../../../util/host-rules';
 import { regEx } from '../../../util/regex';
+import { PypiDatasource } from '../../datasource/pypi';
 import type {
   UpdateArtifact,
   UpdateArtifactsConfig,
@@ -82,6 +85,16 @@ export function constructPipCompileCmd(
         if (value) {
           args.push(`--resolver=${value}`);
         }
+      } else if (argument.startsWith('--index-url=')) {
+        args.push(
+          `--index-url=${buildIndexUrl(argument.replace('--index-url=', ''))}`
+        );
+      } else if (argument.startsWith('--extra-index-url=')) {
+        args.push(
+          `--extra-index-url=${buildIndexUrl(
+            argument.replace('--extra-index-url=', '')
+          )}`
+        );
       } else if (argument.startsWith('--')) {
         logger.trace(
           { argument },
@@ -95,6 +108,32 @@ export function constructPipCompileCmd(
   args.push(upath.parse(inputFileName).base);
 
   return args.map((argument) => quote(argument)).join(' ');
+}
+
+function buildIndexUrl(url: string): string {
+  const cleanedUrl = cleanUrl(url);
+  const matchingHostRule = find({
+    hostType: PypiDatasource.id,
+    url: cleanedUrl,
+  });
+
+  return matchingHostRule?.username && matchingHostRule?.password
+    ? buildUrlWithCredentials(cleanedUrl, matchingHostRule)
+    : cleanedUrl;
+}
+
+function cleanUrl(url: string): string {
+  return url.replace(/(https?:\/\/)(.+:.+@)?(.+)/, '$1$3');
+}
+
+function buildUrlWithCredentials(
+  url: string,
+  matchingHostRule: HostRule
+): string {
+  return url.replace(
+    /(https?:\/\/)(.+)/,
+    `$1${matchingHostRule.username!}:${matchingHostRule.password!}@$2`
+  );
 }
 
 export async function updateArtifacts({
