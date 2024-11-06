@@ -36,6 +36,11 @@ const HatchSchema = z.object({
     .optional(),
 });
 
+const UvIndexSource = z.object({
+  // uv applies the same normalization as for Python dependencies on indexes
+  index: z.string().transform((index) => normalizePythonDepName(index)),
+});
+
 const UvGitSource = z.object({
   git: z.string(),
   rev: z.string().optional(),
@@ -58,11 +63,22 @@ const UvWorkspaceSource = z.object({
 
 // https://docs.astral.sh/uv/concepts/dependencies/#dependency-sources
 const UvSource = z.union([
+  UvIndexSource,
   UvGitSource,
   UvUrlSource,
   UvPathSource,
   UvWorkspaceSource,
 ]);
+
+// https://docs.astral.sh/uv/concepts/dependencies/#index
+const UvIndex = z.object({
+  // uv applies the same normalization as for Python dependencies on indexes
+  name: z.string().transform((name) => normalizePythonDepName(name)),
+  url: z.string(),
+  explicit: z.boolean().optional(),
+  default: z.boolean().optional(),
+});
+export type UvIndex = z.infer<typeof UvIndex>;
 
 const UvSchema = z.object({
   'dev-dependencies': DependencyListSchema,
@@ -71,6 +87,7 @@ const UvSchema = z.object({
     z.string().transform((source) => normalizePythonDepName(source)),
     UvSource,
   ).optional(),
+  index: z.array(UvIndex).optional(),
 });
 
 export const PyProjectSchema = z.object({
