@@ -17,9 +17,9 @@ import type {
   Upgrade,
 } from '../../types';
 import { applyGitSource } from '../../util';
-import { type PyProject, UvLockfileSchema } from '../schema';
+import { type PyProject, type UvIndex, UvLockfileSchema } from '../schema';
 import { depTypes, parseDependencyList } from '../utils';
-import type { PyProjectProcessor } from './types';
+import type { PyProjectProcessor, UvExtractedIndexes } from './types';
 
 const uvUpdateCMD = 'uv lock';
 
@@ -37,34 +37,55 @@ export class UvProcessor implements PyProjectProcessor {
       ),
     );
 
+    const uvIndexes = getIndexes(uv.index ?? []);
+
     // https://docs.astral.sh/uv/concepts/dependencies/#dependency-sources
     // Skip sources that do not make sense to handle (e.g. path).
-    if (uv.sources) {
-      for (const dep of deps) {
-        // istanbul ignore if
-        if (!dep.packageName) {
-          continue;
-        }
+    const uvSources = uv.sources ?? {};
 
-        // Using `packageName` as it applies PEP 508 normalization, which is
-        // also applied by uv when matching a source to a dependency.
-        const depSource = uv.sources[dep.packageName];
-        if (depSource) {
-          dep.depType = depTypes.uvSources;
-          if ('url' in depSource) {
-            dep.skipReason = 'unsupported-url';
-          } else if ('path' in depSource) {
-            dep.skipReason = 'path-dependency';
-          } else if ('workspace' in depSource) {
-            dep.skipReason = 'inherited-dependency';
+    for (const dep of deps) {
+      // istanbul ignore if
+      if (!dep.packageName) {
+        continue;
+      }
+
+      // Using `packageName` as it applies PEP 508 normalization, which is
+      // also applied by uv when matching a source to a dependency.
+      const depSource = uvSources[dep.packageName];
+      if (depSource) {
+        dep.depType = depTypes.uvSources;
+        if ('url' in depSource) {
+          dep.skipReason = 'unsupported-url';
+        } else if ('path' in depSource) {
+          dep.skipReason = 'path-dependency';
+        } else if ('workspace' in depSource) {
+          dep.skipReason = 'inherited-dependency';
+        } else if ('index' in depSource) {
+          dep.registryUrls = [
+            uvIndexes.explicit[depSource.index] ??
+              uvIndexes.implicit[depSource.index],
+          ];
+        } else if ('git' in depSource) {
+          applyGitSource(
+            dep,
+            depSource.git,
+            depSource.rev,
+            depSource.tag,
+            depSource.branch,
+          );
+        }
+      } else {
+        if (is.nonEmptyObject(uvIndexes.implicit)) {
+          if (is.nonEmptyObject(uvIndexes.default)) {
+            dep.registryUrls = [
+              ...Object.values(uvIndexes.implicit),
+              ...Object.values(uvIndexes.default),
+            ];
           } else {
-            applyGitSource(
-              dep,
-              depSource.git,
-              depSource.rev,
-              depSource.tag,
-              depSource.branch,
-            );
+            dep.registryUrls = [
+              ...Object.values(uvIndexes.implicit),
+              PypiDatasource.defaultURL,
+            ];
           }
         }
       }
@@ -129,7 +150,7 @@ export class UvProcessor implements PyProjectProcessor {
       };
 
       const extraEnv = {
-        ...getUvExtraIndexUrl(updateArtifact.updatedDeps),
+        ...getIndexesEnvVars(updateArtifact.updatedDeps),
       };
       const execOptions: ExecOptions = {
         cwdFile: packageFileName,
@@ -214,7 +235,7 @@ function getMatchingHostRule(url: string | undefined): HostRule {
   return find({ hostType: PypiDatasource.id, url });
 }
 
-function getUvExtraIndexUrl(deps: Upgrade[]): NodeJS.ProcessEnv {
+function getIndexesEnvVars(deps: Upgrade[]): NodeJS.ProcessEnv {
   const pyPiRegistryUrls = deps
     .filter((dep) => dep.datasource === PypiDatasource.id)
     .map((dep) => dep.registryUrls)
@@ -242,4 +263,24 @@ function getUvExtraIndexUrl(deps: Upgrade[]): NodeJS.ProcessEnv {
   return {
     UV_EXTRA_INDEX_URL: extraIndexUrls.join(' '),
   };
+}
+
+function getIndexes(indexes: UvIndex[]): UvExtractedIndexes {
+  const extractedIndexes: UvExtractedIndexes = {
+    explicit: {},
+    implicit: {},
+    default: {},
+  };
+
+  for (const index of indexes) {
+    if (index.default) {
+      extractedIndexes.default[index.name] = index.url;
+    } else if (index.explicit) {
+      extractedIndexes.explicit[index.name] = index.url;
+    } else {
+      extractedIndexes.implicit[index.name] = index.url;
+    }
+  }
+
+  return extractedIndexes;
 }

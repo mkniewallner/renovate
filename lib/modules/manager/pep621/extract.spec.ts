@@ -2,6 +2,7 @@ import { codeBlock } from 'common-tags';
 import { Fixtures } from '../../../../test/fixtures';
 import { fs } from '../../../../test/util';
 import { GitRefsDatasource } from '../../datasource/git-refs';
+import { PypiDatasource } from '../../datasource/pypi';
 import { depTypes } from './utils';
 import { extractPackageFile } from '.';
 
@@ -324,6 +325,131 @@ describe('modules/manager/pep621/extract', () => {
             'https://pypi.org/pypi/',
             'https://private-site.org/pypi/simple',
           ],
+        },
+      ]);
+    });
+
+    it('should apply uv sources and env var credentials', async () => {
+      const result = await extractPackageFile(
+        codeBlock`
+        [project]
+        dependencies = [
+          "public-package==0.1.0",
+          "private-package==0.1.0",
+          "private-package-2==0.1.0",
+        ]
+
+        [tool.uv.sources]
+        private-package = { index = "explicit-private-registry" }
+        private-package-2 = { index = "implicit-private-registry" }
+
+        [[tool.uv.index]]
+        name = "explicit-private-registry"
+        url = "https://explicit-private-registry.example.com"
+        explicit = true
+
+        [[tool.uv.index]]
+        name = "implicit-private-registry"
+        url = "https://implicit-private-registry.example.com"
+        `,
+        'pyproject.toml',
+      );
+
+      expect(result?.deps).toStrictEqual([
+        {
+          depName: 'public-package',
+          depType: depTypes.dependencies,
+          datasource: PypiDatasource.id,
+          packageName: 'public-package',
+          currentValue: '==0.1.0',
+          currentVersion: '0.1.0',
+          registryUrls: [
+            'https://implicit-private-registry.example.com',
+            PypiDatasource.defaultURL,
+          ],
+        },
+        {
+          depName: 'private-package',
+          depType: depTypes.uvSources,
+          datasource: PypiDatasource.id,
+          packageName: 'private-package',
+          currentValue: '==0.1.0',
+          currentVersion: '0.1.0',
+          registryUrls: ['https://explicit-private-registry.example.com'],
+        },
+        {
+          depName: 'private-package-2',
+          depType: depTypes.uvSources,
+          datasource: PypiDatasource.id,
+          packageName: 'private-package-2',
+          currentValue: '==0.1.0',
+          currentVersion: '0.1.0',
+          registryUrls: ['https://implicit-private-registry.example.com'],
+        },
+      ]);
+    });
+
+    it('should disable PyPi when setting default index', async () => {
+      const result = await extractPackageFile(
+        codeBlock`
+        [project]
+        dependencies = [
+          "public-package==0.1.0",
+          "private-package==0.1.0",
+          "private-package-2==0.1.0",
+        ]
+
+        [tool.uv.sources]
+        private-package = { index = "explicit-private-registry" }
+        private-package-2 = { index = "implicit-private-registry" }
+
+        [[tool.uv.index]]
+        name = "explicit-private-registry"
+        url = "https://explicit-private-registry.example.com"
+        explicit = true
+
+        [[tool.uv.index]]
+        name = "implicit-private-registry"
+        url = "https://implicit-private-registry.example.com"
+
+        [[tool.uv.index]]
+        name = "default-private-registry"
+        url = "https://default-private-registry.example.com"
+        default = true
+        `,
+        'pyproject.toml',
+      );
+
+      expect(result?.deps).toStrictEqual([
+        {
+          depName: 'public-package',
+          depType: depTypes.dependencies,
+          datasource: PypiDatasource.id,
+          packageName: 'public-package',
+          currentValue: '==0.1.0',
+          currentVersion: '0.1.0',
+          registryUrls: [
+            'https://implicit-private-registry.example.com',
+            'https://default-private-registry.example.com',
+          ],
+        },
+        {
+          depName: 'private-package',
+          depType: depTypes.uvSources,
+          datasource: PypiDatasource.id,
+          packageName: 'private-package',
+          currentValue: '==0.1.0',
+          currentVersion: '0.1.0',
+          registryUrls: ['https://explicit-private-registry.example.com'],
+        },
+        {
+          depName: 'private-package-2',
+          depType: depTypes.uvSources,
+          datasource: PypiDatasource.id,
+          packageName: 'private-package-2',
+          currentValue: '==0.1.0',
+          currentVersion: '0.1.0',
+          registryUrls: ['https://implicit-private-registry.example.com'],
         },
       ]);
     });

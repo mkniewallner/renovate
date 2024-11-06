@@ -25,3 +25,9 @@ export interface PyProjectProcessor {
     packageFile: string,
   ): Promise<PackageDependency[]>;
 }
+
+export interface UvExtractedIndexes {
+  explicit: Record<string, string>;
+  implicit: Record<string, string>;
+  default: Record<string, string>;
+}
