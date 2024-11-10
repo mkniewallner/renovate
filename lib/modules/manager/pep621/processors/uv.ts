@@ -7,6 +7,7 @@ import { exec } from '../../../../util/exec';
 import type { ExecOptions, ToolConstraint } from '../../../../util/exec/types';
 import { getSiblingFileName, readLocalFile } from '../../../../util/fs';
 import { find } from '../../../../util/host-rules';
+import { regEx } from '../../../../util/regex';
 import { Result } from '../../../../util/result';
 import { parseUrl } from '../../../../util/url';
 import { PypiDatasource } from '../../../datasource/pypi';
@@ -150,7 +151,7 @@ export class UvProcessor implements PyProjectProcessor {
       };
 
       const extraEnv = {
-        ...getIndexesEnvVars(updateArtifact.updatedDeps),
+        ...getIndexesEnvVars(project),
       };
       const execOptions: ExecOptions = {
         cwdFile: packageFileName,
@@ -235,34 +236,29 @@ function getMatchingHostRule(url: string | undefined): HostRule {
   return find({ hostType: PypiDatasource.id, url });
 }
 
-function getIndexesEnvVars(deps: Upgrade[]): NodeJS.ProcessEnv {
-  const pyPiRegistryUrls = deps
-    .filter((dep) => dep.datasource === PypiDatasource.id)
-    .map((dep) => dep.registryUrls)
-    .flat();
-  const registryUrls = new Set(pyPiRegistryUrls);
-  const extraIndexUrls: string[] = [];
+function getIndexesEnvVars(project: PyProject): NodeJS.ProcessEnv {
+  const indexes = project.tool?.uv?.index ?? [];
+  const envVars: NodeJS.ProcessEnv = {};
 
-  for (const registryUrl of registryUrls) {
-    const parsedUrl = parseUrl(registryUrl);
+  for (const index of indexes) {
+    const parsedUrl = parseUrl(index.url);
     if (!parsedUrl) {
       continue;
     }
 
     const rule = getMatchingHostRule(parsedUrl.toString());
+    const formattedIndexName = index.name
+      .replace(regEx(/(\.|-)+/g), '_')
+      .toUpperCase();
     if (rule.username) {
-      parsedUrl.username = rule.username;
+      envVars[`UV_INDEX_${formattedIndexName}_USERNAME`] = rule.username;
     }
     if (rule.password) {
-      parsedUrl.password = rule.password;
+      envVars[`UV_INDEX_${formattedIndexName}_PASSWORD`] = rule.password;
     }
-
-    extraIndexUrls.push(parsedUrl.toString());
   }
 
-  return {
-    UV_EXTRA_INDEX_URL: extraIndexUrls.join(' '),
-  };
+  return envVars;
 }
 
 function getIndexes(indexes: UvIndex[]): UvExtractedIndexes {
